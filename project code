@@ -1,0 +1,180 @@
+//Hamza Altaieb 62200019
+//Raed Aldouh 62200100
+//ahmed alrefaei 62190028
+/**
+ * DC Motor Control with PIC16F877A
+ * Forward / Reverse / Stop
+ * PWM Speed Control
+ */
+
+#include <xc.h>
+#include <stdint.h>
+
+// ================= CONFIG =================
+#pragma config FOSC = HS
+#pragma config WDTE = OFF
+#pragma config PWRTE = OFF
+#pragma config BOREN = OFF
+#pragma config LVP = OFF
+#pragma config CPD = OFF
+#pragma config WRT = OFF
+#pragma config CP = OFF
+
+#define _XTAL_FREQ 8000000UL
+
+// ================= PIN DEFINITIONS =================
+#define DIR1_BUTTON  RB0
+#define DIR2_BUTTON  RB1
+#define STOP_BUTTON  RB2
+
+#define DIR1_LED     RB3
+#define DIR2_LED     RB4
+
+// ================= GLOBAL VARIABLES =================
+uint16_t adc_value = 0;
+uint8_t direction = 0;   // 0 = stop, 1 = forward, 2 = reverse
+
+// ================= FUNCTION PROTOTYPES =================
+void Initialize_System(void);
+void Initialize_ADC(void);
+void Initialize_PWM(void);
+uint16_t Read_ADC(void);
+void Set_PWM1_Duty(uint16_t duty);
+void Set_PWM2_Duty(uint16_t duty);
+void Process_Buttons(void);
+void Update_Motor_Control(void);
+void Motor_Stop(void);
+
+// ================= MAIN =================
+void main(void)
+{
+    Initialize_System();
+
+    while(1)
+    {
+        adc_value = Read_ADC();
+        Process_Buttons();
+        Update_Motor_Control();
+        __delay_ms(10);
+    }
+}
+
+// ================= INITIALIZATION =================
+void Initialize_System(void)
+{
+    TRISB = 0x07;   // RB0–RB2 inputs
+    PORTB = 0x00;
+    OPTION_REGbits.nRBPU = 0;
+
+    TRISC = 0x00;
+    PORTC = 0x00;
+
+    Initialize_ADC();
+    Initialize_PWM();
+}
+
+void Initialize_ADC(void)
+{
+    ADCON1 = 0x80;
+    ADCON0 = 0x41;
+    __delay_us(20);
+}
+
+void Initialize_PWM(void)
+{
+    PR2 = 249;
+    T2CON = 0x06;
+
+    CCPR1L = 0;
+    CCP1CON = 0x00;
+
+    CCPR2L = 0;
+    CCP2CON = 0x00;
+}
+
+// ================= MOTOR CONTROL =================
+void Motor_Stop(void)
+{
+    CCP1CONbits.CCP1M = 0;
+    CCP2CONbits.CCP2M = 0;
+
+    PORTC = 0x00;
+    direction = 0;
+
+    __delay_ms(200);
+}
+
+void Set_PWM1_Duty(uint16_t duty)
+{
+    if(duty > 1023) duty = 1023;
+    CCPR1L = duty >> 2;
+    CCP1CON = (CCP1CON & 0xCF) | ((duty & 0x03) << 4);
+}
+
+void Set_PWM2_Duty(uint16_t duty)
+{
+    if(duty > 1023) duty = 1023;
+    CCPR2L = duty >> 2;
+    CCP2CON = (CCP2CON & 0xCF) | ((duty & 0x03) << 4);
+}
+
+// ================= ADC =================
+uint16_t Read_ADC(void)
+{
+    ADCON0bits.GO = 1;
+    while(ADCON0bits.GO);
+    return ((uint16_t)ADRESH << 8) | ADRESL;
+}
+
+// ================= BUTTON CONTROL =================
+void Process_Buttons(void)
+{
+    static uint8_t last_state = 0xFF;
+    uint8_t now = PORTB & 0x07;
+
+    if (now == last_state) return;
+    __delay_ms(20);
+    now = PORTB & 0x07;
+
+    // STOP
+    if (!STOP_BUTTON)
+    {
+        Motor_Stop();
+    }
+
+    // FORWARD
+    else if (!DIR1_BUTTON && direction != 1)
+    {
+        Motor_Stop();
+        CCP1CONbits.CCP1M = 0x0C;
+        DIR1_LED = 1;
+        DIR2_LED = 0;
+        direction = 1;
+    }
+
+    // REVERSE
+    else if (!DIR2_BUTTON && direction != 2)
+    {
+        Motor_Stop();
+        CCP2CONbits.CCP2M = 0x0C;
+        DIR1_LED = 0;
+        DIR2_LED = 1;
+        direction = 2;
+    }
+
+    last_state = now;
+}
+
+// ================= PWM UPDATE =================
+void Update_Motor_Control(void)
+{
+    if (direction == 1)
+        Set_PWM1_Duty(adc_value);
+    else if (direction == 2)
+        Set_PWM2_Duty(adc_value);
+    else
+    {
+        Set_PWM1_Duty(0);
+        Set_PWM2_Duty(0);
+    }
+}
